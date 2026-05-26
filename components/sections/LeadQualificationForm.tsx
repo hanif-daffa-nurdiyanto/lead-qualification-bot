@@ -221,6 +221,12 @@ const LeadQualificationForm = () => {
   }
 
   const submitLead = async () => {
+    console.log("[LeadQualificationForm] Submitting lead to Airtable", {
+      body: JSON.stringify({
+        ...form,
+        source: SOURCE,
+      }),
+    })
     setIsSubmitting(true)
     setError("")
 

@@ -1,0 +1,44 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma-client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum LeadStatus {
+  Cold
+  Warm
+  Hot
+}
+
+enum LeadProcess {
+  New
+  Qualified
+  Negotiation
+  Won
+  Lost
+}
+
+model Lead {
+  id               String      @id @default(cuid())
+  airtableRecordId String?     @unique
+  name             String
+  email            String
+  company          String
+  industry         String
+  painPoint        String
+  budget           String
+  timeline         String
+  score            Int
+  status           LeadStatus
+  process          LeadProcess @default(New)
+  source           String
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  @@index([email])
+  @@index([process])
+  @@index([createdAt])
+}

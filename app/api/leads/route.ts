@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 
+import { createAirtableLead } from "@/lib/airtable-leads"
+import { prisma } from "@/lib/prisma"
+
 type LeadStatus = "Cold" | "Warm" | "Hot"
 
 type LeadPayload = {
@@ -10,7 +13,7 @@ type LeadPayload = {
   painPoint: string
   budget: string
   timeline: string
-  source: "Landing Page Chatbot"
+  source: "Landing Page Chatbot" | "Start Project Page"
 }
 
 type Qualification = {
@@ -21,7 +24,6 @@ type Qualification = {
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const validStatuses = new Set<LeadStatus>(["Cold", "Warm", "Hot"])
-const maxLogBodyLength = 2_000
 
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status })
@@ -33,14 +35,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function cleanString(value: unknown) {
   return typeof value === "string" ? value.trim() : ""
-}
-
-function truncateForLog(value: string) {
-  if (value.length <= maxLogBodyLength) {
-    return value
-  }
-
-  return `${value.slice(0, maxLogBodyLength)}... [truncated]`
 }
 
 function validateLeadPayload(input: unknown): LeadPayload | string {
@@ -56,7 +50,7 @@ function validateLeadPayload(input: unknown): LeadPayload | string {
     painPoint: cleanString(input.painPoint),
     budget: cleanString(input.budget),
     timeline: cleanString(input.timeline),
-    source: "Landing Page Chatbot" as const,
+    source: cleanString(input.source) as LeadPayload["source"],
   }
 
   const requiredFields: Array<keyof Omit<LeadPayload, "source">> = [
@@ -246,80 +240,6 @@ async function qualifyWithGroq(lead: LeadPayload): Promise<Qualification> {
   }
 }
 
-async function saveToAirtable(lead: LeadPayload, qualification: Qualification) {
-  const apiKey = process.env.AIRTABLE_API_KEY
-  const baseId = process.env.AIRTABLE_BASE_ID
-  const tableName = process.env.AIRTABLE_TABLE_NAME
-
-  if (!apiKey || !baseId || !tableName) {
-    console.error("[leads] Missing Airtable environment variables", {
-      hasApiKey: Boolean(apiKey),
-      hasBaseId: Boolean(baseId),
-      hasTableName: Boolean(tableName),
-    })
-
-    throw new Error("Missing Airtable environment variables.")
-  }
-
-  const response = await fetch(
-    `https://api.airtable.com/v0/${baseId}/${encodeURIComponent(tableName)}`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        fields: {
-          Name: lead.name,
-          Email: lead.email,
-          Company: lead.company,
-          Industry: lead.industry,
-          "Pain Point": lead.painPoint,
-          Budget: lead.budget,
-          Timeline: lead.timeline,
-          Score: qualification.score,
-          Status: qualification.status,
-          Source: lead.source,
-          "Created At": new Date().toISOString().slice(0, 10),
-        },
-      }),
-    }
-  )
-
-  if (!response.ok) {
-    const responseBody = await response.text().catch(() => "")
-
-    console.error("[leads] Airtable insert failed", {
-      status: response.status,
-      statusText: response.statusText,
-      baseId,
-      tableName,
-      lead: {
-        email: lead.email,
-        company: lead.company,
-        industry: lead.industry,
-        budget: lead.budget,
-        timeline: lead.timeline,
-      },
-      qualification: {
-        score: qualification.score,
-        status: qualification.status,
-      },
-      responseBody: truncateForLog(responseBody),
-    })
-
-    throw new Error("Airtable insert failed.")
-  }
-
-  console.log("[leads] Airtable insert succeeded", {
-    email: lead.email,
-    company: lead.company,
-    score: qualification.score,
-    status: qualification.status,
-  })
-}
-
 export async function POST(request: NextRequest) {
   let body: unknown
 
@@ -355,13 +275,60 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    await saveToAirtable(validatedLead, qualification)
+    const dbLead = await prisma.lead.create({
+      data: {
+        name: validatedLead.name,
+        email: validatedLead.email,
+        company: validatedLead.company,
+        industry: validatedLead.industry,
+        painPoint: validatedLead.painPoint,
+        budget: validatedLead.budget,
+        timeline: validatedLead.timeline,
+        score: qualification.score,
+        status: qualification.status,
+        process: "New",
+        source: validatedLead.source,
+      },
+    })
+
+    try {
+      const airtableRecordId = await createAirtableLead(dbLead)
+
+      await prisma.lead.update({
+        where: {
+          id: dbLead.id,
+        },
+        data: {
+          airtableRecordId,
+        },
+      })
+
+      console.log("[leads] Lead saved to database and Airtable", {
+        leadId: dbLead.id,
+        airtableRecordId,
+        email: dbLead.email,
+        company: dbLead.company,
+        score: dbLead.score,
+        status: dbLead.status,
+        process: dbLead.process,
+      })
+    } catch (airtableError) {
+      console.error("[leads] Lead saved to database but Airtable sync failed", {
+        leadId: dbLead.id,
+        message:
+          airtableError instanceof Error
+            ? airtableError.message
+            : "Unknown Airtable error",
+      })
+    }
 
     return NextResponse.json({
       ok: true,
       lead: {
+        id: dbLead.id,
         score: qualification.score,
         status: qualification.status,
+        process: dbLead.process,
       },
     })
   } catch (error) {
