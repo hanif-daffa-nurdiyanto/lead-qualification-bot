@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
+import { FormEvent, useCallback, useMemo, useState } from "react"
 import { motion } from "framer-motion"
 import {
   ColumnDef,
@@ -20,7 +20,9 @@ import {
   IconArrowsSort,
   IconChevronLeft,
   IconChevronRight,
+  IconEdit,
   IconSearch,
+  IconTrash,
 } from "@tabler/icons-react"
 
 import { LeadActionButtons } from "@/components/crm/LeadActionButtons"
@@ -28,6 +30,14 @@ import { LeadDetailDialog } from "@/components/crm/LeadDetailDialog"
 import { ProcessBadge } from "@/components/crm/ProcessBadge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import {
   Table,
@@ -75,6 +85,232 @@ function SortButton({
   )
 }
 
+type EditableLead = Pick<
+  CrmLead,
+  | "name"
+  | "email"
+  | "company"
+  | "industry"
+  | "painPoint"
+  | "budget"
+  | "timeline"
+  | "score"
+  | "status"
+  | "process"
+  | "source"
+>
+
+const emptyEditableLead: EditableLead = {
+  name: "",
+  email: "",
+  company: "",
+  industry: "",
+  painPoint: "",
+  budget: "",
+  timeline: "",
+  score: 0,
+  status: "Cold",
+  process: "New",
+  source: "CRM",
+}
+
+function toEditableLead(lead: CrmLead): EditableLead {
+  return {
+    name: lead.name,
+    email: lead.email,
+    company: lead.company,
+    industry: lead.industry,
+    painPoint: lead.painPoint,
+    budget: lead.budget,
+    timeline: lead.timeline,
+    score: lead.score,
+    status: lead.status,
+    process: lead.process,
+    source: lead.source,
+  }
+}
+
+function LeadEditDialog({
+  lead,
+  open,
+  onOpenChange,
+  onSave,
+  isSaving,
+}: {
+  lead: CrmLead | null
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onSave: (leadId: string, values: EditableLead) => Promise<void>
+  isSaving: boolean
+}) {
+  if (!lead) {
+    return null
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <LeadEditForm
+        key={lead.id}
+        lead={lead}
+        onOpenChange={onOpenChange}
+        onSave={onSave}
+        isSaving={isSaving}
+      />
+    </Dialog>
+  )
+}
+
+function LeadEditForm({
+  lead,
+  onOpenChange,
+  onSave,
+  isSaving,
+}: {
+  lead: CrmLead
+  onOpenChange: (open: boolean) => void
+  onSave: (leadId: string, values: EditableLead) => Promise<void>
+  isSaving: boolean
+}) {
+  const [values, setValues] = useState<EditableLead>(() =>
+    lead ? toEditableLead(lead) : emptyEditableLead
+  )
+
+  const updateValue = <Key extends keyof EditableLead>(
+    key: Key,
+    value: EditableLead[Key]
+  ) => {
+    setValues((current) => ({ ...current, [key]: value }))
+  }
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    if (!lead) {
+      return
+    }
+
+    void onSave(lead.id, values)
+  }
+
+  return (
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>Edit lead</DialogTitle>
+        <DialogDescription>
+          Update lead details and sync the change to Airtable.
+        </DialogDescription>
+      </DialogHeader>
+
+      <form onSubmit={submit}>
+        <div className="grid gap-4 px-5 py-5 sm:grid-cols-2">
+          {[
+            ["name", "Name"],
+            ["email", "Email"],
+            ["company", "Company"],
+            ["industry", "Industry"],
+            ["budget", "Budget"],
+            ["timeline", "Timeline"],
+            ["source", "Source"],
+          ].map(([key, label]) => (
+            <label key={key} className="grid gap-2">
+              <span className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
+                {label}
+              </span>
+              <Input
+                value={String(values[key as keyof EditableLead])}
+                onChange={(event) =>
+                  updateValue(
+                    key as keyof EditableLead,
+                    event.target.value as never
+                  )
+                }
+              />
+            </label>
+          ))}
+
+          <label className="grid gap-2">
+            <span className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
+              Score
+            </span>
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              value={values.score}
+              onChange={(event) =>
+                updateValue("score", Number(event.target.value))
+              }
+            />
+          </label>
+
+          <label className="grid gap-2">
+            <span className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
+              Status
+            </span>
+            <select
+              value={values.status}
+              onChange={(event) =>
+                updateValue("status", event.target.value as CrmLead["status"])
+              }
+              className="h-10 border bg-background px-3 text-sm transition outline-none focus:border-primary"
+            >
+              {(["Cold", "Warm", "Hot"] as const).map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="grid gap-2">
+            <span className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
+              Process
+            </span>
+            <select
+              value={values.process}
+              onChange={(event) =>
+                updateValue("process", event.target.value as CrmLead["process"])
+              }
+              className="h-10 border bg-background px-3 text-sm transition outline-none focus:border-primary"
+            >
+              {leadProcesses.map((process) => (
+                <option key={process} value={process}>
+                  {process}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="grid gap-2 sm:col-span-2">
+            <span className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
+              Pain point
+            </span>
+            <textarea
+              value={values.painPoint}
+              onChange={(event) => updateValue("painPoint", event.target.value)}
+              rows={5}
+              className="min-h-30 resize-none border bg-background px-3 py-2 text-sm leading-6 transition outline-none focus:border-primary"
+            />
+          </label>
+        </div>
+
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+          >
+            Cancel
+          </Button>
+          <Button type="submit" disabled={isSaving}>
+            {isSaving ? "Saving..." : "Save changes"}
+          </Button>
+        </DialogFooter>
+      </form>
+    </DialogContent>
+  )
+}
+
 export function LeadTable({ leads: initialLeads }: LeadTableProps) {
   const [leads, setLeads] = useState(initialLeads)
   const [sorting, setSorting] = useState<SortingState>([
@@ -86,6 +322,9 @@ export function LeadTable({ leads: initialLeads }: LeadTableProps) {
   const [globalFilter, setGlobalFilter] = useState("")
   const [updatingId, setUpdatingId] = useState("")
   const [selectedLead, setSelectedLead] = useState<CrmLead | null>(null)
+  const [editingLead, setEditingLead] = useState<CrmLead | null>(null)
+  const [isSavingEdit, setIsSavingEdit] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [error, setError] = useState("")
 
   const updateProcess = useCallback(
@@ -198,9 +437,7 @@ export function LeadTable({ leads: initialLeads }: LeadTableProps) {
       {
         accessorKey: "status",
         header: ({ column }) => <SortButton label="Status" column={column} />,
-        cell: ({ row }) => (
-          <ProcessBadge process={row.original.status} />
-        ),
+        cell: ({ row }) => <ProcessBadge process={row.original.status} />,
         filterFn: (row, id, value) =>
           !value || row.getValue<string>(id) === value,
       },
@@ -281,6 +518,118 @@ export function LeadTable({ leads: initialLeads }: LeadTableProps) {
     getPaginationRowModel: getPaginationRowModel(),
   })
 
+  const selectedLeads = table
+    .getFilteredSelectedRowModel()
+    .rows.map((row) => row.original)
+  const selectedCount = selectedLeads.length
+
+  const saveLead = async (leadId: string, values: EditableLead) => {
+    setIsSavingEdit(true)
+    setError("")
+
+    try {
+      const response = await fetch(`/api/crm/leads/${leadId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(values),
+      })
+      const payload = (await response.json()) as
+        | { ok: true; lead: CrmLead }
+        | { ok: false; error: string }
+
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.ok ? "Unable to update lead." : payload.error)
+      }
+
+      setLeads((current) =>
+        current.map((lead) => (lead.id === leadId ? payload.lead : lead))
+      )
+      setSelectedLead((current) =>
+        current?.id === leadId ? payload.lead : current
+      )
+      setEditingLead(null)
+      setRowSelection({})
+    } catch (caughtError) {
+      setError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Unable to update lead."
+      )
+    } finally {
+      setIsSavingEdit(false)
+    }
+  }
+
+  const deleteLeads = async (ids: string[]) => {
+    if (ids.length === 0) {
+      return
+    }
+
+    const confirmed = window.confirm(
+      ids.length === 1
+        ? "Delete this lead?"
+        : `Delete ${ids.length} selected leads?`
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    setIsDeleting(true)
+    setError("")
+
+    try {
+      if (ids.length === 1) {
+        const response = await fetch(`/api/crm/leads/${ids[0]}`, {
+          method: "DELETE",
+        })
+        const payload = (await response.json()) as
+          | { ok: true; id: string }
+          | { ok: false; error: string }
+
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.ok ? "Unable to delete lead." : payload.error)
+        }
+      } else {
+        const response = await fetch("/api/crm/leads/bulk-delete", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ ids }),
+        })
+        const payload = (await response.json()) as
+          | { ok: true; ids: string[] }
+          | { ok: false; error: string }
+
+        if (!response.ok || !payload.ok) {
+          throw new Error(
+            payload.ok ? "Unable to delete leads." : payload.error
+          )
+        }
+      }
+
+      setLeads((current) => current.filter((lead) => !ids.includes(lead.id)))
+      setSelectedLead((current) =>
+        current && ids.includes(current.id) ? null : current
+      )
+      setEditingLead((current) =>
+        current && ids.includes(current.id) ? null : current
+      )
+      setRowSelection({})
+    } catch (caughtError) {
+      setError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Unable to delete selected leads."
+      )
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
   return (
     <TooltipProvider>
       <motion.div
@@ -350,6 +699,51 @@ export function LeadTable({ leads: initialLeads }: LeadTableProps) {
               ))}
             </select>
           </div>
+
+          {selectedCount > 0 && (
+            <div className="flex flex-col gap-3 border-b bg-muted/40 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-start">
+              <div className="flex flex-wrap gap-2">
+                {selectedCount === 1 && (
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setEditingLead(selectedLeads[0])}
+                    >
+                      <IconEdit data-icon="inline-start" />
+                      Edit
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      disabled={isDeleting}
+                      onClick={() => void deleteLeads([selectedLeads[0].id])}
+                    >
+                      <IconTrash data-icon="inline-start" />
+                      Delete
+                    </Button>
+                  </>
+                )}
+                {selectedCount > 1 && (
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="sm"
+                    disabled={isDeleting}
+                    onClick={() =>
+                      void deleteLeads(selectedLeads.map((lead) => lead.id))
+                    }
+                  >
+                    <IconTrash data-icon="inline-start" />
+                    {isDeleting ? "Deleting..." : "Bulk delete"}
+                  </Button>
+                )}
+              </div>
+              <p className="font-semibold">{selectedCount} selected</p>
+            </div>
+          )}
 
           {error && (
             <div className="border-b bg-destructive/10 px-4 py-3 text-sm text-destructive">
@@ -451,6 +845,17 @@ export function LeadTable({ leads: initialLeads }: LeadTableProps) {
               setSelectedLead(null)
             }
           }}
+        />
+        <LeadEditDialog
+          lead={editingLead}
+          open={Boolean(editingLead)}
+          onOpenChange={(open) => {
+            if (!open) {
+              setEditingLead(null)
+            }
+          }}
+          onSave={saveLead}
+          isSaving={isSavingEdit}
         />
       </motion.div>
     </TooltipProvider>

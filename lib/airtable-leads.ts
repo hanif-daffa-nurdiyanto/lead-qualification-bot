@@ -163,6 +163,82 @@ export async function updateAirtableLeadProcess(
   }
 }
 
+export async function updateAirtableLead(
+  lead: Pick<
+    Lead,
+    | "airtableRecordId"
+    | "name"
+    | "email"
+    | "company"
+    | "industry"
+    | "painPoint"
+    | "budget"
+    | "timeline"
+    | "score"
+    | "status"
+    | "process"
+    | "source"
+    | "createdAt"
+  >
+) {
+  if (!lead.airtableRecordId) {
+    return
+  }
+
+  const config = getAirtableConfig()
+  const response = await fetch(`${config.endpoint}/${lead.airtableRecordId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${config.apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      fields: leadToAirtableFields(lead),
+    }),
+  })
+
+  if (!response.ok) {
+    const responseBody = await response.text().catch(() => "")
+
+    console.error("[airtable] Lead update failed", {
+      status: response.status,
+      statusText: response.statusText,
+      airtableRecordId: lead.airtableRecordId,
+      email: lead.email,
+      responseBody: truncateForLog(responseBody),
+    })
+
+    throw new Error("Airtable lead update failed.")
+  }
+}
+
+export async function deleteAirtableLead(airtableRecordId: string | null) {
+  if (!airtableRecordId) {
+    return
+  }
+
+  const config = getAirtableConfig()
+  const response = await fetch(`${config.endpoint}/${airtableRecordId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${config.apiKey}`,
+    },
+  })
+
+  if (!response.ok) {
+    const responseBody = await response.text().catch(() => "")
+
+    console.error("[airtable] Lead delete failed", {
+      status: response.status,
+      statusText: response.statusText,
+      airtableRecordId,
+      responseBody: truncateForLog(responseBody),
+    })
+
+    throw new Error("Airtable lead delete failed.")
+  }
+}
+
 export function normalizeLeadStatus(value: unknown): LeadStatus {
   return value === "Hot" || value === "Warm" || value === "Cold" ? value : "Cold"
 }
