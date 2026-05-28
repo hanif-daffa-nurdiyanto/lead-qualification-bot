@@ -21,6 +21,7 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconEdit,
+  IconPlus,
   IconSearch,
   IconTrash,
 } from "@tabler/icons-react"
@@ -114,6 +115,31 @@ const emptyEditableLead: EditableLead = {
   source: "CRM",
 }
 
+const industryOptions = [
+  "SaaS",
+  "Finance",
+  "Healthcare",
+  "Logistics",
+  "E-commerce",
+  "Education",
+  "Other",
+]
+
+const budgetOptions = [
+  "Under $2k",
+  "$2k - $5k",
+  "$5k - $15k",
+  "$15k+",
+  "Not sure yet",
+]
+
+const timelineOptions = [
+  "Immediately",
+  "This month",
+  "This quarter",
+  "Not sure yet",
+]
+
 function toEditableLead(lead: CrmLead): EditableLead {
   return {
     name: lead.name,
@@ -160,6 +186,37 @@ function LeadEditDialog({
   )
 }
 
+function LeadAddDialog({
+  open,
+  onOpenChange,
+  onSave,
+  isSaving,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onSave: (values: EditableLead) => Promise<void>
+  isSaving: boolean
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <LeadForm
+        key={open ? "open" : "closed"}
+        title="Add lead"
+        description="Create a manual CRM lead and sync it to Airtable."
+        initialValues={{
+          ...emptyEditableLead,
+          source: "CRM Manual",
+        }}
+        onOpenChange={onOpenChange}
+        onSubmit={onSave}
+        isSaving={isSaving}
+        submitLabel="Add lead"
+        savingLabel="Adding..."
+      />
+    </Dialog>
+  )
+}
+
 function LeadEditForm({
   lead,
   onOpenChange,
@@ -171,9 +228,40 @@ function LeadEditForm({
   onSave: (leadId: string, values: EditableLead) => Promise<void>
   isSaving: boolean
 }) {
-  const [values, setValues] = useState<EditableLead>(() =>
-    lead ? toEditableLead(lead) : emptyEditableLead
+  return (
+    <LeadForm
+      title="Edit lead"
+      description="Update lead details and sync the change to Airtable."
+      initialValues={toEditableLead(lead)}
+      onOpenChange={onOpenChange}
+      onSubmit={(values) => onSave(lead.id, values)}
+      isSaving={isSaving}
+      submitLabel="Save changes"
+      savingLabel="Saving..."
+    />
   )
+}
+
+function LeadForm({
+  title,
+  description,
+  initialValues,
+  onOpenChange,
+  onSubmit,
+  isSaving,
+  submitLabel,
+  savingLabel,
+}: {
+  title: string
+  description: string
+  initialValues: EditableLead
+  onOpenChange: (open: boolean) => void
+  onSubmit: (values: EditableLead) => Promise<void>
+  isSaving: boolean
+  submitLabel: string
+  savingLabel: string
+}) {
+  const [values, setValues] = useState<EditableLead>(() => initialValues)
 
   const updateValue = <Key extends keyof EditableLead>(
     key: Key,
@@ -184,21 +272,14 @@ function LeadEditForm({
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-
-    if (!lead) {
-      return
-    }
-
-    void onSave(lead.id, values)
+    void onSubmit(values)
   }
 
   return (
     <DialogContent>
       <DialogHeader>
-        <DialogTitle>Edit lead</DialogTitle>
-        <DialogDescription>
-          Update lead details and sync the change to Airtable.
-        </DialogDescription>
+        <DialogTitle>{title}</DialogTitle>
+        <DialogDescription>{description}</DialogDescription>
       </DialogHeader>
 
       <form onSubmit={submit}>
@@ -207,9 +288,6 @@ function LeadEditForm({
             ["name", "Name"],
             ["email", "Email"],
             ["company", "Company"],
-            ["industry", "Industry"],
-            ["budget", "Budget"],
-            ["timeline", "Timeline"],
             ["source", "Source"],
           ].map(([key, label]) => (
             <label key={key} className="grid gap-2">
@@ -225,6 +303,34 @@ function LeadEditForm({
                   )
                 }
               />
+            </label>
+          ))}
+
+          {[
+            ["industry", "Industry", industryOptions],
+            ["budget", "Budget", budgetOptions],
+            ["timeline", "Timeline", timelineOptions],
+          ].map(([key, label, options]) => (
+            <label key={key as string} className="grid gap-2">
+              <span className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
+                {label as string}
+              </span>
+              <select
+                value={String(values[key as keyof EditableLead])}
+                onChange={(event) =>
+                  updateValue(
+                    key as keyof EditableLead,
+                    event.target.value as never
+                  )
+                }
+                className="h-10 border bg-background px-3 text-sm transition outline-none focus:border-primary"
+              >
+                {(options as string[]).map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
             </label>
           ))}
 
@@ -303,7 +409,7 @@ function LeadEditForm({
             Cancel
           </Button>
           <Button type="submit" disabled={isSaving}>
-            {isSaving ? "Saving..." : "Save changes"}
+            {isSaving ? savingLabel : submitLabel}
           </Button>
         </DialogFooter>
       </form>
@@ -323,7 +429,9 @@ export function LeadTable({ leads: initialLeads }: LeadTableProps) {
   const [updatingId, setUpdatingId] = useState("")
   const [selectedLead, setSelectedLead] = useState<CrmLead | null>(null)
   const [editingLead, setEditingLead] = useState<CrmLead | null>(null)
+  const [isAddingLead, setIsAddingLead] = useState(false)
   const [isSavingEdit, setIsSavingEdit] = useState(false)
+  const [isSavingAdd, setIsSavingAdd] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [error, setError] = useState("")
 
@@ -562,6 +670,38 @@ export function LeadTable({ leads: initialLeads }: LeadTableProps) {
     }
   }
 
+  const addLead = async (values: EditableLead) => {
+    setIsSavingAdd(true)
+    setError("")
+
+    try {
+      const response = await fetch("/api/crm/leads", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(values),
+      })
+      const payload = (await response.json()) as
+        | { ok: true; lead: CrmLead }
+        | { ok: false; error: string }
+
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.ok ? "Unable to add lead." : payload.error)
+      }
+
+      setLeads((current) => [payload.lead, ...current])
+      setIsAddingLead(false)
+      setRowSelection({})
+    } catch (caughtError) {
+      setError(
+        caughtError instanceof Error ? caughtError.message : "Unable to add lead."
+      )
+    } finally {
+      setIsSavingAdd(false)
+    }
+  }
+
   const deleteLeads = async (ids: string[]) => {
     if (ids.length === 0) {
       return
@@ -639,7 +779,7 @@ export function LeadTable({ leads: initialLeads }: LeadTableProps) {
         className="grid gap-4"
       >
         <div className="border bg-background">
-          <div className="grid gap-3 border-b p-4 lg:grid-cols-[1fr_auto_auto_auto]">
+          <div className="grid gap-3 border-b p-4 lg:grid-cols-[1fr_auto_auto_auto_auto]">
             <div className="relative">
               <IconSearch className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -698,6 +838,15 @@ export function LeadTable({ leads: initialLeads }: LeadTableProps) {
                 </option>
               ))}
             </select>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => setIsAddingLead(true)}
+              className="h-10"
+            >
+              <IconPlus data-icon="inline-start" />
+              Add Lead
+            </Button>
           </div>
 
           {selectedCount > 0 && (
@@ -856,6 +1005,12 @@ export function LeadTable({ leads: initialLeads }: LeadTableProps) {
           }}
           onSave={saveLead}
           isSaving={isSavingEdit}
+        />
+        <LeadAddDialog
+          open={isAddingLead}
+          onOpenChange={setIsAddingLead}
+          onSave={addLead}
+          isSaving={isSavingAdd}
         />
       </motion.div>
     </TooltipProvider>
